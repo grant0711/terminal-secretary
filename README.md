@@ -23,14 +23,21 @@ sudo docker-compose build
 
 ### 2. Capture a conversation
 ```bash
-sudo docker-compose run --rm terminal-secretary python3 main.py record
+./secretary record
 ```
 Press `Ctrl+C` when the conversation is finished to stop recording and generate the summary.
 
 ### 3. Search past conversations
 ```bash
-sudo docker-compose run --rm terminal-secretary python3 main.py search "What did we decide about the database?"
+./secretary search "What did we decide about the database?"
 ```
+
+## Installation (Optional: Global Command)
+To run `secretary` from anywhere in your terminal, create a symlink in your local bin:
+```bash
+sudo ln -sf $(pwd)/secretary /usr/local/bin/secretary
+```
+Then you can just run `secretary record` or `secretary search` without the `./`.
 
 ## Architecture
 - **audio.py**: Sets up a virtual PulseAudio sink and loops back Mic/Monitor sources to it.
