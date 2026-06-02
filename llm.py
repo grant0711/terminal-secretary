@@ -15,8 +15,13 @@ class Summarizer:
 - Even if the transcript is very short or contains casual chatter, do NOT say "there is nothing to summarize."
 - Instead, describe the TOPIC or NATURE of the interaction (e.g., "A brief greeting," "Concluding a discussion," "Testing audio levels," or "Casual small talk").
 - If specific decisions or action items are present, list them.
-- **IMPORTANT**: If there are any tasks or action items for the user, list them explicitly on their own lines using the format: `- [ACTION]: description of task`
-- If it's a monologue, summarize the main point being made.
+- **IMPORTANT**: You MUST identify tasks, action items, and "notes to self". 
+- Explicitly include **scheduling meetings**, **reaching out to people**, and **reminders** as tasks.
+- Format every task on its own line exactly like this: `- [ACTION]: description of task`
+- Examples of tasks to extract: 
+    - `- [ACTION]: Schedule meeting with Doug and Clinton to discuss interaction model`
+    - `- [ACTION]: Follow up with Li Shon regarding the feedback loop`
+    - `- [ACTION]: Research GPU acceleration for Docker`
 
 ### TRANSCRIPT:
 {transcript}
