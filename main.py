@@ -2,27 +2,29 @@ import argparse
 import sys
 import time
 import os
+import re
 import numpy as np
 import threading
 import queue
+from datetime import datetime, timedelta
 from audio import AudioInterceptor
 from stt import STTEngine
 from llm import Summarizer
 from db import DatabaseManager
 
 class TerminalSecretary:
-    def __init__(self):
+    def __init__(self, mode="record"):
         self.db = DatabaseManager()
-        model_size = os.getenv("MODEL_SIZE", "small")
-        self.stt = STTEngine(model_size=model_size)
+        self.summarizer = Summarizer(model=os.getenv("SUMMARIZER_MODEL", "llama3"))
         
-        summarizer_model = os.getenv("SUMMARIZER_MODEL", "llama3")
-        self.summarizer = Summarizer(model=summarizer_model)
-        
-        # Using custom ALSA device names defined dynamically in /etc/asound.conf
-        self.mic = "mic"
-        self.monitor = "monitor"
-        self.audio = AudioInterceptor(self.mic, self.monitor)
+        # Only init STT and Audio if recording
+        if mode == "record":
+            model_size = os.getenv("MODEL_SIZE", "small")
+            self.stt = STTEngine(model_size=model_size)
+            # Using custom ALSA device names defined dynamically in /etc/asound.conf
+            self.mic = "mic"
+            self.monitor = "monitor"
+            self.audio = AudioInterceptor(self.mic, self.monitor)
         
         self.transcript_buffer = []
         self.audio_processing_queue = queue.Queue()
@@ -30,7 +32,8 @@ class TerminalSecretary:
         self.stop_event = threading.Event()
 
     def record(self):
-        if not self.audio.setup():
+        if not hasattr(self, 'audio') or not self.audio.setup():
+            print("Audio setup failed. Ensure you are in record mode.")
             return
 
         print("\n--- Recording Started ---")
@@ -44,7 +47,7 @@ class TerminalSecretary:
             try:
                 audio_ingestion_queue.put_nowait(indata.copy())
             except queue.Full:
-                pass # Prevent memory explosion if processing hangs
+                pass 
 
         # Start transcription thread
         transcription_thread = threading.Thread(target=self._transcription_loop)
@@ -98,12 +101,24 @@ class TerminalSecretary:
                 summary = self.summarizer.summarize(full_transcript)
                 print(f"\nSummary:\n{summary}")
                 
-                self.db.save_conversation(full_transcript, summary)
-                print("\nConversation saved to database.")
+                conv_id = self.db.save_conversation(full_transcript, summary)
+                print(f"\nConversation saved (ID: {conv_id}).")
+                
+                # Extract and save tasks
+                self._extract_tasks(summary, conv_id)
             else:
                 print("No speech detected. Nothing to save.")
             
             self.audio.cleanup()
+
+    def _extract_tasks(self, summary, conv_id):
+        """Parses the summary for - [ACTION]: items and saves them as todos."""
+        tasks = re.findall(r'^- \[ACTION\]: (.*)', summary, re.MULTILINE)
+        if tasks:
+            print(f"\nExtracted {len(tasks)} tasks:")
+            for task in tasks:
+                self.db.add_todo(task.strip(), conversation_id=conv_id)
+                print(f"  - [ ] {task.strip()}")
 
     def _transcription_loop(self):
         """Background thread to handle heavy STT processing."""
@@ -113,8 +128,6 @@ class TerminalSecretary:
                 total_rms = np.sqrt(np.mean(audio_data**2))
                 
                 if total_rms > 0.005:
-                    # This print is now thread-safe but might overlap with the signal meter
-                    # We'll use a newline to clear the meter
                     print(f"\n[Processing 10s segment... Avg Signal: {total_rms:.4f}]")
                     text = self.stt.transcribe(audio_data)
                     if text:
@@ -124,6 +137,52 @@ class TerminalSecretary:
                 continue
             except Exception as e:
                 print(f"\nTranscription Error: {e}")
+
+    def todo_list(self, show_all=False):
+        status = None if show_all else "pending"
+        todos = self.db.get_todos(status=status)
+        if not todos:
+            print("No tasks found.")
+            return
+
+        print(f"\n--- {'All' if show_all else 'Pending'} Tasks ---")
+        for t in todos:
+            check = "[x]" if t[2] == "done" else "[ ]"
+            print(f"{t[0]:>3}. {check} {t[1]} ({t[3][:16]})")
+
+    def todo_add(self, text):
+        todo_id = self.db.add_todo(text)
+        print(f"Added task {todo_id}: {text}")
+
+    def todo_done(self, todo_id):
+        self.db.mark_todo_done(todo_id)
+        print(f"Marked task {todo_id} as done.")
+
+    def todo_rm(self, todo_id):
+        self.db.remove_todo(todo_id)
+        print(f"Removed task {todo_id}.")
+
+    def review(self, timeframe):
+        now = datetime.now()
+        if timeframe == "yesterday":
+            start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0).strftime('%Y-%m-%d %H:%M:%S')
+            end = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59).strftime('%Y-%m-%d %H:%M:%S')
+        elif timeframe == "week":
+            start = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+            end = now.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            print("Invalid timeframe. Use 'yesterday' or 'week'.")
+            return
+
+        conversations = self.db.get_conversations_in_range(start, end)
+        if not conversations:
+            print(f"No conversations found for {timeframe}.")
+            return
+
+        print(f"\nGenerating synthesized review for {timeframe}...")
+        review_text = self.summarizer.generate_review(conversations, timeframe)
+        print(f"\n--- {timeframe.upper()} REVIEW ---")
+        print(review_text)
 
     def search(self, query):
         print(f"Searching for: '{query}'...")
@@ -140,20 +199,60 @@ class TerminalSecretary:
 
 def main():
     parser = argparse.ArgumentParser(description="Terminal Secretary")
-    parser.add_argument("command", choices=["record", "search"], help="Command to run")
-    parser.add_argument("query", nargs="?", help="Search query")
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # Record
+    subparsers.add_parser("record", help="Start capturing audio")
+
+    # Search
+    search_parser = subparsers.add_parser("search", help="Search history")
+    search_parser.add_argument("query", help="Search query")
+
+    # Todo
+    todo_parser = subparsers.add_parser("todo", help="Manage tasks")
+    todo_subparsers = todo_parser.add_subparsers(dest="todo_command", help="Todo sub-commands")
     
+    list_parser = todo_subparsers.add_parser("list", help="List tasks")
+    list_parser.add_argument("--all", action="store_true", help="Show all tasks including done")
+    
+    add_parser = todo_subparsers.add_parser("add", help="Add a task manually")
+    add_parser.add_argument("text", help="Task description")
+    
+    done_parser = todo_subparsers.add_parser("done", help="Mark task as done")
+    done_parser.add_argument("id", type=int, help="Task ID")
+    
+    rm_parser = todo_subparsers.add_parser("rm", help="Remove a task")
+    rm_parser.add_argument("id", type=int, help="Task ID")
+
+    # Review
+    review_parser = subparsers.add_parser("review", help="Generate activity review")
+    review_parser.add_argument("timeframe", choices=["yesterday", "week"], help="Timeframe for review")
+
     args = parser.parse_args()
     
-    app = TerminalSecretary()
+    if not args.command:
+        parser.print_help()
+        return
+
+    app = TerminalSecretary(mode=args.command)
     
     if args.command == "record":
         app.record()
     elif args.command == "search":
-        if not args.query:
-            print("Please provide a search query.")
+        app.search(args.query)
+    elif args.command == "todo":
+        if args.todo_command == "list":
+            app.todo_list(show_all=args.all)
+        elif args.todo_command == "add":
+            app.todo_add(args.text)
+        elif args.todo_command == "done":
+            app.todo_done(args.id)
+        elif args.todo_command == "rm":
+            app.todo_rm(args.id)
         else:
-            app.search(args.query)
+            todo_parser.print_help()
+    elif args.command == "review":
+        app.review(args.timeframe)
 
 if __name__ == "__main__":
     main()
