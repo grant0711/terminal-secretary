@@ -1,0 +1,22 @@
+# Private / sensitive data
+.env
+data/
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Models / Cache (Pre-downloaded models)
+.cache/
+hf_models/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db

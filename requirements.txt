@@ -1,0 +1,11 @@
+sounddevice
+numpy
+faster-whisper
+ollama
+chromadb
+rich
+textual
+librosa
+torch
+torchaudio
+pyaudio
