@@ -174,9 +174,19 @@ class TerminalSecretary:
         self.db.mark_todo_done(todo_id)
         print(f"Marked task {todo_id} as done.")
 
-    def todo_rm(self, todo_id):
-        self.db.remove_todo(todo_id)
-        print(f"Removed task {todo_id}.")
+    def todo_rm(self, todo_id=None, all_tasks=False):
+        if all_tasks:
+            confirm = input("Are you sure you want to remove ALL tasks? (y/n): ")
+            if confirm.lower() == 'y':
+                self.db.clear_todos()
+                print("All tasks removed.")
+            else:
+                print("Operation cancelled.")
+        elif todo_id is not None:
+            self.db.remove_todo(todo_id)
+            print(f"Removed task {todo_id}.")
+        else:
+            print("Please specify a task ID or use --all.")
 
     def review(self, timeframe):
         now = datetime.now()
@@ -238,7 +248,8 @@ def main():
     done_parser.add_argument("id", type=int, help="Task ID")
     
     rm_parser = todo_subparsers.add_parser("rm", help="Remove a task")
-    rm_parser.add_argument("id", type=int, help="Task ID")
+    rm_parser.add_argument("id", type=int, nargs='?', help="Task ID (optional if using --all)")
+    rm_parser.add_argument("--all", "-a", action="store_true", help="Remove all tasks")
 
     # Review
     review_parser = subparsers.add_parser("review", help="Generate activity review")
@@ -264,7 +275,7 @@ def main():
         elif args.todo_command == "done":
             app.todo_done(args.id)
         elif args.todo_command == "rm":
-            app.todo_rm(args.id)
+            app.todo_rm(todo_id=args.id, all_tasks=args.all)
         else:
             todo_parser.print_help()
     elif args.command == "review":

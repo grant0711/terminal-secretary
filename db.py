@@ -86,6 +86,11 @@ class DatabaseManager:
         cursor.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
         self.conn.commit()
 
+    def clear_todos(self):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM todos")
+        self.conn.commit()
+
     def get_conversations_in_range(self, start_date, end_date):
         cursor = self.conn.cursor()
         cursor.execute(
