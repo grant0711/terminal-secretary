@@ -63,8 +63,6 @@ class AudioInterceptor:
     def _mixer_loop(self, combined_callback):
         while self.is_running:
             try:
-                # Wait for data from both streams with a timeout
-                # If one stream is missing, we still want to keep going
                 mic_chunk = None
                 mon_chunk = None
                 
@@ -78,16 +76,20 @@ class AudioInterceptor:
                 except queue.Empty:
                     pass
                 
-                if mic_chunk is not None and mon_chunk is not None:
-                    mixed_chunk = (mic_chunk + mon_chunk) / 2.0
-                elif mic_chunk is not None:
-                    mixed_chunk = mic_chunk
-                elif mon_chunk is not None:
-                    mixed_chunk = mon_chunk
+                # If both are present, stack them (Dual-Channel)
+                # If only one is present, zero-pad the other to maintain dual-channel structure
+                if mic_chunk is not None or mon_chunk is not None:
+                    if mic_chunk is None:
+                        mic_chunk = np.zeros_like(mon_chunk)
+                    if mon_chunk is None:
+                        mon_chunk = np.zeros_like(mic_chunk)
+                    
+                    # Ensure lengths match
+                    min_len = min(len(mic_chunk), len(mon_chunk))
+                    dual_chunk = np.hstack((mic_chunk[:min_len], mon_chunk[:min_len]))
+                    combined_callback(dual_chunk, None, None, None)
                 else:
                     continue
-                
-                combined_callback(mixed_chunk, None, None, None)
             except Exception as e:
                 print(f"Mixer error: {e}")
                 continue

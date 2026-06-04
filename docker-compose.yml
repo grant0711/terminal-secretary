@@ -3,12 +3,11 @@ version: '3.8'
 services:
   terminal-secretary:
     build: .
-    container_name: terminal-secretary
     network_mode: host
     volumes:
       - .:/app
       - /run/user/${USER_ID:-1000}/pulse:/run/user/${USER_ID:-1000}/pulse
-      - ${HOME}/.config/pulse/cookie:/root/.config/pulse/cookie:ro
+      - ${PULSE_CONFIG_DIR:-${HOME}/.config/pulse}:/root/.config/pulse:ro
       - data:/app/data
     environment:
       - USER_ID=${USER_ID:-1000}

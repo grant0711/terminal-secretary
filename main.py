@@ -63,9 +63,9 @@ class TerminalSecretary:
         try:
             while self.is_recording:
                 try:
-                    chunk = audio_ingestion_queue.get(timeout=0.1).flatten()
+                    chunk = audio_ingestion_queue.get(timeout=0.1)
                     
-                    # Signal visualization
+                    # Signal visualization (max RMS across channels)
                     rms = np.sqrt(np.mean(chunk**2))
                     bar_len = int(min(rms * 500, 50))
                     bar = '*' * bar_len
@@ -75,7 +75,7 @@ class TerminalSecretary:
                     samples_in_buffer += len(chunk)
                     
                     if samples_in_buffer >= target_samples:
-                        audio_to_process = np.concatenate(current_buffer)
+                        audio_to_process = np.concatenate(current_buffer, axis=0)
                         self.audio_processing_queue.put(audio_to_process)
                         current_buffer = []
                         samples_in_buffer = 0
@@ -121,18 +121,34 @@ class TerminalSecretary:
                 print(f"  - [ ] {task.strip()}")
 
     def _transcription_loop(self):
-        """Background thread to handle heavy STT processing."""
+        """Background thread to handle heavy STT processing for both channels."""
         while not self.stop_event.is_set() or not self.audio_processing_queue.empty():
             try:
                 audio_data = self.audio_processing_queue.get(timeout=1.0)
-                total_rms = np.sqrt(np.mean(audio_data**2))
                 
-                if total_rms > 0.005:
-                    print(f"\n[Processing 10s segment... Avg Signal: {total_rms:.4f}]")
-                    text = self.stt.transcribe(audio_data)
-                    if text:
-                        print(f"[Captured]: {text}")
-                        self.transcript_buffer.append(text)
+                # Split channels (Mic is channel 0, Monitor is channel 1)
+                mic_data = audio_data[:, 0]
+                mon_data = audio_data[:, 1]
+                
+                mic_rms = np.sqrt(np.mean(mic_data**2))
+                mon_rms = np.sqrt(np.mean(mon_data**2))
+                
+                # Process Mic
+                if mic_rms > 0.005:
+                    print(f"\n[Processing ME 10s... Signal: {mic_rms:.4f}]")
+                    mic_text = self.stt.transcribe(mic_data)
+                    if mic_text:
+                        print(f"[ME]: {mic_text}")
+                        self.transcript_buffer.append(f"[ME]: {mic_text}")
+                
+                # Process Monitor
+                if mon_rms > 0.005:
+                    print(f"\n[Processing OTHERS 10s... Signal: {mon_rms:.4f}]")
+                    mon_text = self.stt.transcribe(mon_data)
+                    if mon_text:
+                        print(f"[OTHERS]: {mon_text}")
+                        self.transcript_buffer.append(f"[OTHERS]: {mon_text}")
+                        
             except queue.Empty:
                 continue
             except Exception as e:
